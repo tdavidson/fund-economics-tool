@@ -1,0 +1,8 @@
+src
+test
+tsconfig.json
+vitest.config.ts
+.gitignore
+.github
+node_modules
+*.tsbuildinfo
