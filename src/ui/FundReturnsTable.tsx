@@ -25,7 +25,7 @@ const ROWS: Row[] = [
 export function FundReturnsTable({ result }: Props) {
   return (
     <div className="overflow-x-auto border border-border rounded-sm">
-      <table className="min-w-full text-sm">
+      <table className="min-w-full text-xs md:text-[13px]">
         <thead>
           <tr className="border-b text-left text-muted-foreground">
             <th className="px-4 py-2 font-medium uppercase tracking-widest text-xs">Returns</th>

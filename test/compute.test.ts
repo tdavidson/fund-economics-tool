@@ -77,11 +77,6 @@ describe('computeFund', () => {
       );
     });
 
-    it('without waterfall, preferred return and catchup are 0', () => {
-      expect(result.preferredReturn.total).toBe(0);
-      expect(result.gpCatchup.total).toBe(0);
-    });
-
     it('carried interest paid equals carried interest earned', () => {
       expect(result.carriedInterestPaid.total).toBeCloseTo(result.carriedInterestEarned.total, 6);
       expect(result.carriedInterestPaid.lp).toBeCloseTo(result.carriedInterestEarned.gp, 6);
@@ -177,28 +172,179 @@ describe('computeFund', () => {
     });
   });
 
-  describe('waterfall (preferred return + GP catchup)', () => {
-    const withWaterfall: FundInputs = {
-      ...DEFAULT_INPUTS,
-      waterfall: { preferredReturnPct: 0.08, gpCatchupPct: 1.0 },
-    };
-    const result = computeFund(withWaterfall);
+  describe('per-side carry attribution', () => {
+    const result = computeFund(DEFAULT_INPUTS);
 
-    it('preferred return is positive when pref > 0 and fund is profitable', () => {
-      expect(result.preferredReturn.total).toBeGreaterThan(0);
-      expect(result.preferredReturn.lp).toBeGreaterThan(0);
-      expect(result.preferredReturn.gp).toBe(0);
+    it('GP pays 0% carry on its own profit', () => {
+      expect(result.carriedInterestPaid.gp).toBe(0);
     });
 
-    it('GP catchup is positive when LP has been made whole on pref', () => {
-      expect(result.gpCatchup.total).toBeGreaterThan(0);
-      expect(result.gpCatchup.gp).toBeGreaterThan(0);
-      expect(result.gpCatchup.lp).toBe(0);
-    });
-
-    it('carried interest earned goes to GP', () => {
+    it('GP earns the full carry pool', () => {
       expect(result.carriedInterestEarned.gp).toBeGreaterThan(0);
       expect(result.carriedInterestEarned.lp).toBe(0);
+      expect(result.carriedInterestEarned.total).toBeCloseTo(
+        result.carriedInterestPaid.total,
+        6,
+      );
+    });
+
+    it('LP carry = LP profit × carryPct', () => {
+      const profitLP = Math.max(
+        0,
+        result.proceeds.lp - result.recycledCapital.lp - result.calledCapital.lp,
+      );
+      expect(result.carriedInterestPaid.lp).toBeCloseTo(profitLP * DEFAULT_INPUTS.carryPct, 6);
+    });
+  });
+
+  describe('per-side reconciliation', () => {
+    const result = computeFund(DEFAULT_INPUTS);
+
+    it('invested LP + GP = invested total', () => {
+      expect(result.investedCapital.lp + result.investedCapital.gp).toBeCloseTo(
+        result.investedCapital.total,
+        4,
+      );
+    });
+
+    it('proceeds per side = invested × gross multiple', () => {
+      expect(result.proceeds.lp).toBeCloseTo(
+        result.investedCapital.lp * result.grossMultiple.total,
+        4,
+      );
+      expect(result.proceeds.gp).toBeCloseTo(
+        result.investedCapital.gp * result.grossMultiple.total,
+        4,
+      );
+    });
+
+    it('distributions total = proceeds − recycled − carry', () => {
+      expect(result.distributions.total).toBeCloseTo(
+        result.proceeds.total - result.recycledCapital.total - result.carriedInterestPaid.total,
+        4,
+      );
+    });
+
+    it('LP invested is less than pro-rata when GP commit is counted (fee asymmetry)', () => {
+      // GP pays 0 fees on its own commit, so fees come out of LP's share only.
+      // LP's invested is therefore below lpPct × invested.total.
+      const lpPct = 1 - DEFAULT_INPUTS.gpCommitPct;
+      expect(result.investedCapital.lp).toBeLessThan(result.investedCapital.total * lpPct);
+    });
+  });
+
+  describe('integer mode (tierFractional = false)', () => {
+    it('stage count floors and reduces called capital', () => {
+      // Default stage: 1 stage, 100% pct, $750k check → raw count = 28.6 → floor = 28.
+      // Deployed = 28 × 750k = 21.0M (was 21.45M). Called drops accordingly.
+      const r = computeFund({ ...DEFAULT_INPUTS, tierFractional: false });
+      const deployed = 28 * 750_000;
+      const expectedCalled =
+        deployed + r.managementFees.total + r.partnershipExpenses.total - r.recycledCapital.total;
+      expect(r.calledCapital.total).toBeCloseTo(expectedCalled, 0);
+      expect(r.calledCapital.total).toBeLessThan(DEFAULT_INPUTS.committedCapital);
+    });
+
+    it('invested equals deployed when in integer mode', () => {
+      const r = computeFund({ ...DEFAULT_INPUTS, tierFractional: false });
+      expect(r.investedCapital.total).toBeCloseTo(28 * 750_000, 0);
+    });
+  });
+
+  describe('reserve ratio', () => {
+    it('deployed per stage = floor(count) × check / (1 − reserve)', () => {
+      // Single stage, 100% pct, 30% reserve, $1M check, $25M committed.
+      // Pre-solve invested = 21.45M. Initial count = 21.45 × 0.7 / 1 = 15.015.
+      // Fractional: deployed = 15.015 × 1M / 0.7 = 21.45M.
+      const inputs: FundInputs = {
+        ...DEFAULT_INPUTS,
+        portfolio: {
+          newPct: 1.0,
+          followPct: 0,
+          avgCheckSizeNew: 1_000_000,
+          avgCheckSizeFollow: 0,
+          entryStages: [
+            {
+              name: 'seed',
+              numInvestments: 0,
+              avgCheckSize: 1_000_000,
+              pctAllocation: 1.0,
+              reserveRatio: 0.3,
+            },
+          ],
+        },
+      };
+      const r = computeFund(inputs);
+      // With fractional counts, deployed equals the full allocation.
+      expect(r.investedCapital.total).toBeCloseTo(21_450_000, 0);
+    });
+
+    it('reserve + floor compound: deployed shrinks when count rounds down', () => {
+      const inputs: FundInputs = {
+        ...DEFAULT_INPUTS,
+        tierFractional: false,
+        portfolio: {
+          newPct: 1.0,
+          followPct: 0,
+          avgCheckSizeNew: 1_000_000,
+          avgCheckSizeFollow: 0,
+          entryStages: [
+            {
+              name: 'seed',
+              numInvestments: 0,
+              avgCheckSize: 1_000_000,
+              pctAllocation: 1.0,
+              reserveRatio: 0.3,
+            },
+          ],
+        },
+      };
+      const r = computeFund(inputs);
+      // Raw count = 15.015 → floor = 15. Deployed = 15 × 1M / 0.7 = 21.428M (< 21.45M).
+      expect(r.investedCapital.total).toBeCloseTo(15_000_000 / 0.7, 0);
+      expect(r.investedCapital.total).toBeLessThan(21_450_000);
+    });
+  });
+
+  describe('stageInputMode independence', () => {
+    const baseStages: FundInputs = {
+      ...DEFAULT_INPUTS,
+      portfolio: {
+        newPct: 1.0,
+        followPct: 0,
+        avgCheckSizeNew: 750_000,
+        avgCheckSizeFollow: 0,
+        entryStages: [
+          { name: 'seed', numInvestments: 20, avgCheckSize: 750_000, pctAllocation: 1.0 },
+        ],
+      },
+    };
+
+    it('tierInputMode does not affect stage-derived capital when stageInputMode is pinned', () => {
+      // With stageInputMode pinned, toggling tierInputMode shouldn't reach
+      // back into stage math — that's the independence guarantee.
+      const pct = computeFund({
+        ...baseStages,
+        stageInputMode: 'pct-capital',
+        tierInputMode: 'pct-capital',
+      });
+      const num = computeFund({
+        ...baseStages,
+        stageInputMode: 'pct-capital',
+        tierInputMode: 'num-companies',
+      });
+      expect(pct.investedCapital.total).toBeCloseTo(num.investedCapital.total, 2);
+      expect(pct.calledCapital.total).toBeCloseTo(num.calledCapital.total, 2);
+    });
+
+    it('stageInputMode can differ from tierInputMode', () => {
+      const r = computeFund({
+        ...baseStages,
+        stageInputMode: 'num-companies',
+        tierInputMode: 'pct-capital',
+      });
+      // Stage uses numInvestments (20) → deployed = 20 × 750k = 15M
+      expect(r.investedCapital.total).toBeCloseTo(15_000_000, 0);
     });
   });
 });
