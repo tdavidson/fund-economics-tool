@@ -405,7 +405,6 @@ Specifically missing:
 
 ## Related
 
-- [@hemrock/fund-accounting](https://github.com/tdavidson/fund-accounting) — plain-text double-entry accounting for funds
 - [Hemrock MCP server](https://www.hemrock.com/mcp) — live AI context for editing Hemrock models
 - [Hemrock Skill](https://www.hemrock.com/skill) — drop-in skill for Claude Projects
 
