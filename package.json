@@ -1,6 +1,6 @@
 {
   "name": "@tdavidson/fund-economics-tool",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Aggregate fund economics model — inputs → TVPI/DPI/IRR using a power-law return-tier structure. TypeScript port of the Hemrock Fund Economics Tool.",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Taylor Davidson",

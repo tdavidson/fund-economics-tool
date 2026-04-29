@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 — 2026-04-28                                                                                   
+                                                                                                          
+README only. Removed a stale link to a non-existent package. No code changes.
+
 ## 0.4.0 — 2026-04-27
 
 First public release on npm. License pivots from MIT to source-available; functional behavior unchanged from 0.3.0.
